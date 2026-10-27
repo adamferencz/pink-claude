@@ -2,6 +2,8 @@
 
 Růžovo-fialová 2D plošinovka do prohlížeče, která jde hrát na počítači i na mobilu. Hráč skáče po platformách, sbírá mince, chroupe okurkové power-upy a může si popovídat s AI přítelkyní Lumi.
 
+**Hrát online:** https://adamferencz.github.io/pink-claude/
+
 Hra je napsaná v čistém HTML5 Canvas, CSS a JavaScriptu. Nepotřebuje backend, knihovny ani obrázky, všechno se kreslí procedurálně a zvuky se syntetizují přes WebAudio.
 
 ## Spuštění
