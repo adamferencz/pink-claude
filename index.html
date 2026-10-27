@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="cs">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="theme-color" content="#2a0a4a">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <title>Pink &amp; Purple Adventure</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🥒</text></svg>">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <canvas id="game"></canvas>
+
+  <!-- HUD -->
+  <div id="hud" class="hud hidden">
+    <div class="hud-left">
+      <span class="pill" id="hLives"></span>
+      <span class="pill" id="hCoins"></span>
+      <span class="pill" id="hScore"></span>
+    </div>
+    <div class="hud-center"><span class="pill pill-level" id="hLevel"></span></div>
+    <div class="hud-right">
+      <span id="hPowers" class="powers"></span>
+      <button id="btnPause" class="icon-btn" aria-label="Pauza">⏸</button>
+    </div>
+  </div>
+
+  <!-- Dotykové ovládání -->
+  <div id="touch" class="touch-controls">
+    <div id="dpad" class="dpad">
+      <div class="dpad-half">◀</div>
+      <div class="dpad-half">▶</div>
+    </div>
+    <div class="touch-actions">
+      <button id="tInteract" class="tbtn tbtn-interact hidden" aria-label="Promluvit si">💬</button>
+      <button id="tJump" class="tbtn tbtn-jump" aria-label="Skok">⤒</button>
+    </div>
+  </div>
+
+  <!-- Hlavní menu -->
+  <div id="menu" class="overlay">
+    <div class="card card-menu">
+      <h1 class="title"><span>Pink</span> &amp; <span>Purple</span><br>Adventure</h1>
+      <p class="subtitle">Skákej, sbírej mince, chroupej okurky a udělej radost Lumi 💗</p>
+      <div class="buttons">
+        <button class="btn btn-primary" data-action="play">▶ Hrát</button>
+        <button class="btn btn-ghost" data-action="sound">🔊 Zvuk: zapnutý</button>
+      </div>
+      <div class="best">🏆 Nejlepší skóre: <b id="menuBest">0</b></div>
+      <div class="controls-help">
+        <div><kbd>A</kbd><kbd>D</kbd> / <kbd>←</kbd><kbd>→</kbd> pohyb</div>
+        <div><kbd>Mezerník</kbd> / <kbd>W</kbd> / <kbd>↑</kbd> skok</div>
+        <div><kbd>E</kbd> interakce &nbsp; <kbd>Esc</kbd> pauza</div>
+        <div class="pickles-help">
+          <span class="dot" style="--c:#4fd65a"></span> super skok
+          <span class="dot" style="--c:#ffcf33"></span> nezranitelnost
+          <span class="dot" style="--c:#ff5fc8"></span> super rychlost
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Pauza -->
+  <div id="pause" class="overlay hidden">
+    <div class="card">
+      <h2>⏸ Pauza</h2>
+      <div class="buttons">
+        <button class="btn btn-primary" data-action="resume">▶ Pokračovat</button>
+        <button class="btn btn-ghost" data-action="sound">🔊 Zvuk: zapnutý</button>
+        <button class="btn btn-ghost" data-action="menu">🏠 Hlavní menu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dialog s AI přítelkyní -->
+  <div id="dialog" class="overlay hidden">
+    <div class="card card-dialog">
+      <div class="dialog-head">
+        <canvas id="lumiPortrait" width="120" height="120"></canvas>
+        <div class="dialog-info">
+          <h2>Lumi <small>AI přítelkyně</small></h2>
+          <div class="rel" id="relName">Neznámí</div>
+          <div class="aff-bar"><div class="aff-fill" id="affFill"></div></div>
+          <div class="aff-text">Náklonnost: <b id="affText">0</b> / 100</div>
+        </div>
+      </div>
+      <p class="bubble" id="dialogText"></p>
+      <div class="dialog-coins">Máš <b id="dlgCoins">0</b> 🪙</div>
+      <div class="dialog-actions">
+        <button class="btn btn-small" data-action="talk">💬 Promluvit si</button>
+        <button class="btn btn-small btn-gift" data-action="gift" data-amount="10">🪙 10 <small>+5 💗</small></button>
+        <button class="btn btn-small btn-gift" data-action="gift" data-amount="25">🪙 25 <small>+15 💗</small></button>
+        <button class="btn btn-small btn-gift" data-action="gift" data-amount="50">🪙 50 <small>+35 💗</small></button>
+        <button class="btn btn-small" data-action="reward">🎁 Odměna</button>
+        <button class="btn btn-small btn-ghost" data-action="close">👋 Odejít</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Úroveň dokončena -->
+  <div id="clear" class="overlay hidden">
+    <div class="card">
+      <h2>✨ Úroveň dokončena! ✨</h2>
+      <p id="clearText"></p>
+      <div class="buttons">
+        <button class="btn btn-primary" data-action="next">Další úroveň ▶</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Game over -->
+  <div id="over" class="overlay hidden">
+    <div class="card">
+      <h2 class="big-title">GAME OVER</h2>
+      <p id="overText"></p>
+      <div class="buttons">
+        <button class="btn btn-primary" data-action="play">↻ Hrát znovu</button>
+        <button class="btn btn-ghost" data-action="menu">🏠 Hlavní menu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Vítězství -->
+  <div id="win" class="overlay hidden">
+    <div class="card">
+      <h2 class="big-title">🏆 VÍTĚZSTVÍ! 🏆</h2>
+      <p id="winText"></p>
+      <div class="buttons">
+        <button class="btn btn-primary" data-action="play">↻ Hrát znovu</button>
+        <button class="btn btn-ghost" data-action="menu">🏠 Hlavní menu</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Otoč telefon -->
+  <div id="rotate" class="rotate hidden">
+    <div class="rotate-phone">📱</div>
+    <p>Otoč telefon na šířku,<br>hraje se to mnohem líp 💜</p>
+  </div>
+
+  <script src="game.js"></script>
+</body>
+</html>
