@@ -32,6 +32,7 @@ Na telefonu se ukáže dotykový ovladač: vlevo směrová plocha, vpravo tlač�
 
 - **3 úrovně** s rostoucí obtížností: Levandulová louka, Růžové útesy a Okurková pevnost.
 - **Nepřátelé** (fialové slizy) hlídkují a otáčejí se na konci trasy. Kdo jim skočí na hlavu, porazí je, kdo do nich vrazí ze strany, přijde o život.
+- **Boss Duhoroh, pekelný jednorožec.** Probudí se kousek za první propastí v 1. úrovni. Chrlí ohnivé koule, vzepne se a pak se rozběhne, a když mu klesne půlka životů, začne zuřit. Porazí ho 5 skoků na hlavu (nebo zlatá okurka). Dokud žije, je portál do cíle zapečetěný.
 - **Propasti a bodáky.** Po pádu se hráč vrací na poslední bezpečné místo nebo na checkpoint.
 - **Okurky:** zelená dává super skok na 10 s, zlatá nezranitelnost na 8 s (postava bliká a slizy rozráží), růžová super rychlost na 10 s.
 - **Body a mince se počítají zvlášť.** Mince = 10 bodů a 1 mince, poražený nepřítel 50, okurka 25 a dokončená úroveň 200 bodů.

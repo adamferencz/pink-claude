@@ -51,6 +51,7 @@
         L.enemy(21, 10, 2);
         L.arc(24, 9, 4, 1.2);
         L.ground(27, 45);
+        L.boss(28, 5);
         L.plat(30, 9, 4); L.coins(30, 8, 3); L.pickle('jump', 33, 8);
         L.enemy(36, 10, 3);
         L.block(40, 9, 2, 2); L.coins(40, 8, 2);
@@ -183,7 +184,7 @@
     const L = {
       index, name: def.name, w, g,
       coins: [], pickles: [], enemies: [], checkpoints: [],
-      start: { x: 2, y: 10 }, friend: null, goal: null,
+      start: { x: 2, y: 10 }, friend: null, goal: null, bossDef: null,
     };
     const set = (x, y, c) => { if (x >= 0 && x < w && y >= 0 && y < ROWS) g[y][x] = c; };
     const center = (t) => t * TILE + TILE / 2;
@@ -205,6 +206,7 @@
       friend(x, y = 10) { L.friend = { x: center(x), y: (y + 1) * TILE }; },
       goal(x, y = 10) { L.goal = { x: center(x), y: (y + 1) * TILE }; },
       start(x, y = 10) { L.start = { x, y }; },
+      boss(triggerX, hp = 5) { L.bossDef = { trigger: triggerX * TILE, hp }; },
     });
 
     // Runtime stav objektů
@@ -224,6 +226,9 @@
     });
     if (L.friend) { L.friend.talked = false; L.friend.rewardTaken = false; }
     L.totalCoins = L.coins.length;
+    L.boss = null;
+    L.bossDone = false;
+    L.fireballs = [];
     return L;
   }
 
@@ -251,6 +256,7 @@
         'Okurky jsou zelenina. Nebo ovoce? Kontroluju databázi… chyba 404.',
         'Nejsem skutečná AI, jen lokální dialogový systém. Ale nikomu to neříkej.',
         'Ty fialové slizy nemám ráda. Lepí se jim boty… a to ani boty nemají.',
+        'Kousek odsud spí Duhoroh, pekelný jednorožec. Je to bratranec mé tiskárny. Taky plive oheň.',
         'Kdybys měl mince navíc, vím o skvělém místě, kam je dát. Nápověda: tady.',
       ],
       [
@@ -258,6 +264,7 @@
         'Spočítala jsem tvoje skoky. Je jich hodně. Gratuluju?',
         'Zelená okurka = super skok. Zlatá = nesmrtelnost. Růžová = rychlost. Já = dobrá rada.',
         'Kamarádi si pomáhají. Ty mně mincemi, já tobě… morální podporou!',
+        'Duhoroha poraz skoky na hlavu. A když se vzepne, uteč. Fakt uteč.',
         'Kdybych měla nohy, šla bych s tebou. Ale levituju, tak bych spíš letěla.',
       ],
       [
@@ -332,6 +339,18 @@
         case 'check': this.tone(660, 0.1, 'triangle', 0.06); this.tone(990, 0.15, 'triangle', 0.06, 0, 0.09); break;
         case 'over': [392, 330, 262, 196].forEach((f, i) => this.tone(f, 0.3, 'triangle', 0.07, 0, i * 0.22)); break;
         case 'click': this.tone(600, 0.05, 'triangle', 0.04); break;
+        case 'roar':
+          this.tone(110, 0.9, 'sawtooth', 0.09, 40);
+          this.tone(165, 0.7, 'square', 0.05, 55, 0.05);
+          this.tone(70, 1.1, 'sawtooth', 0.08, 30, 0.12);
+          break;
+        case 'growl': this.tone(90, 0.5, 'sawtooth', 0.08, 50); this.tone(140, 0.4, 'square', 0.04, 70); break;
+        case 'fire': this.tone(520, 0.25, 'sawtooth', 0.04, 110); break;
+        case 'bosshit': this.tone(220, 0.3, 'square', 0.07, 60); this.tone(900, 0.12, 'triangle', 0.05); break;
+        case 'bossdie':
+          this.tone(130, 1.4, 'sawtooth', 0.09, 25);
+          [523, 659, 784, 1047, 1319, 1568].forEach((f, i) => this.tone(f, 0.2, 'triangle', 0.06, 0, 1 + i * 0.09));
+          break;
       }
     },
   };
@@ -357,6 +376,7 @@
     affection: 0,
     best: 0,
     levelCoins: 0,
+    flash: 0,
     nearFriend: false,
     vt: 0,
   };
@@ -773,6 +793,10 @@
 
     updateEnemies(dt);
     if (game.state !== 'play') return;
+    updateBoss(dt);
+    if (game.state !== 'play') return;
+    updateFireballs(dt);
+    if (game.state !== 'play') return;
     collectItems();
     updateCheckpoints();
 
@@ -786,7 +810,13 @@
 
     // Cíl
     const g = lvl.goal;
-    if (g && overlap(p, g.x - 16, g.y - 80, 32, 80)) { levelComplete(); return; }
+    if (g && overlap(p, g.x - 16, g.y - 80, 32, 80)) {
+      if (lvl.bossDef && !lvl.bossDone) {
+        p.x = g.x - 16 - p.w - 2;
+        p.vx = -200;
+        if (!floaters.some((f) => f.seal)) floaters.push({ text: 'Portál je zapečetěný! Poraz Duhoroha 🔥', x: g.x, y: g.y - 110, life: 1.6, color: '#ff6060', seal: true });
+      } else { levelComplete(); return; }
+    }
 
     updateEffects(dt);
 
@@ -809,6 +839,7 @@
     for (const e of lvl.enemies) {
       if (e.alive && Math.abs(e.x - p.x) < 150 && Math.abs(e.y - p.y) < 80) return;
     }
+    if (lvl.boss && Math.abs(lvl.boss.x + lvl.boss.w / 2 - p.x) < 260) return;
     p.safeX = p.x;
     p.safeY = p.y;
   }
@@ -938,13 +969,13 @@
   // ================================================================
   //  Efekty: částice, plovoucí texty, banner
   // ================================================================
-  function burst(x, y, n, color, speed, life) {
+  function burst(x, y, n, color, speed, life, g = 500) {
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2;
       const s = speed * (0.3 + Math.random() * 0.7);
-      particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - speed * 0.3, life, max: life, color, r: 2 + Math.random() * 3 });
+      particles.push({ x, y, vx: Math.cos(a) * s, vy: Math.sin(a) * s - speed * 0.3, life, max: life, color, r: 2 + Math.random() * 3, g });
     }
-    if (particles.length > 400) particles.splice(0, particles.length - 400);
+    if (particles.length > 700) particles.splice(0, particles.length - 700);
   }
   function addFloater(text, x, y, color = '#fff') {
     floaters.push({ text, x, y, life: 1.2, color });
@@ -961,7 +992,7 @@
       const q = particles[i];
       q.life -= dt;
       if (q.life <= 0) { particles.splice(i, 1); continue; }
-      q.vy += 500 * dt;
+      q.vy += q.g * dt;
       q.x += q.vx * dt;
       q.y += q.vy * dt;
     }
@@ -972,6 +1003,213 @@
       if (f.life <= 0) floaters.splice(i, 1);
     }
     if (banner) { banner.t -= dt; if (banner.t <= 0) banner = null; }
+    if (game.flash > 0) game.flash = Math.max(0, game.flash - dt);
+  }
+
+  // ================================================================
+  //  Boss: Duhoroh, pekelný jednorožec
+  // ================================================================
+  function findGroundX(px) {
+    const t0 = Math.floor(px / TILE);
+    for (let d = 0; d < 40; d++) {
+      for (const tx of [t0 + d, t0 - d]) {
+        if (tx < 2 || tx > lvl.w - 4) continue;
+        let ok = true;
+        for (let i = -1; i <= 1; i++) {
+          if (!isSolid(tileAt(tx + i, 11)) || isSolid(tileAt(tx + i, 10)) || isSolid(tileAt(tx + i, 9)) || tileAt(tx + i, 10) === '^') ok = false;
+        }
+        if (ok) return tx * TILE + TILE / 2;
+      }
+    }
+    return px;
+  }
+
+  function spawnBoss() {
+    const d = lvl.bossDef;
+    const p = player;
+    const x = findGroundX(Math.min(p.x + 340, lvl.w * TILE - 200));
+    lvl.boss = {
+      x: x - 48, y: -260, w: 96, h: 84, vx: 0, vy: 0, onGround: false,
+      hp: d.hp, maxHp: d.hp, face: -1, state: 'intro', t: 1.8,
+      hurtT: 0, fireT: 2.2, chargeT: 4, anim: 0, dying: 0, runeX: x, fallV: 0, enraged: false,
+    };
+    lvl.fireballs = [];
+    cam.shake = 0.9;
+    game.flash = 0.5;
+    Sound.play('roar');
+    showBanner('⚠ DUHOROH SE PROBUDIL ⚠', 'Pekelný jednorožec · skákej mu na hlavu!', 3.2, '#ff3b3b');
+  }
+
+  function updateBoss(dt) {
+    const d = lvl.bossDef;
+    if (!d) return;
+    const p = player;
+    if (!lvl.boss && !lvl.bossDone && p.x > d.trigger) spawnBoss();
+    const b = lvl.boss;
+    if (!b) return;
+    b.anim += dt;
+    if (b.hurtT > 0) b.hurtT -= dt;
+    const pc = p.x + p.w / 2, bc = b.x + b.w / 2;
+
+    // Plamenná hříva a kouř
+    if (Math.random() < dt * 40) {
+      const hx = bc + b.face * (30 + Math.random() * 14);
+      particles.push({ x: hx, y: b.y - 6 - Math.random() * 10, vx: (Math.random() - 0.5) * 30, vy: -60 - Math.random() * 60, life: 0.6, max: 0.6, color: Math.random() < 0.5 ? '#ff3a00' : '#ffae00', r: 2 + Math.random() * 3, g: -120 });
+    }
+
+    if (b.state === 'dying') {
+      b.dying -= dt;
+      if (Math.random() < dt * 25) burst(b.x + Math.random() * b.w, b.y + Math.random() * b.h, 6, Math.random() < 0.5 ? '#ff2a2a' : '#ffd000', 220, 0.6);
+      if (b.dying <= 0) {
+        burst(bc, b.y + 40, 60, '#ff4fd8', 380, 1.2);
+        for (let i = 0; i < 12; i++) {
+          lvl.coins.push({ x: bc - 110 + i * 20, y: b.y + b.h - 30 - Math.sin(i / 11 * Math.PI) * 70, taken: false, phase: Math.random() * 6 });
+        }
+        lvl.totalCoins += 12;
+        lvl.boss = null;
+        lvl.bossDone = true;
+        showBanner('DUHOROH PORAŽEN! 🦄', 'Portál je odpečetěný · +1000 bodů', 3, '#ffd84a');
+      }
+      return;
+    }
+
+    if (b.state === 'intro') {
+      b.t -= dt;
+      if (Math.random() < dt * 60) {
+        const a = Math.random() * Math.PI * 2;
+        particles.push({ x: b.runeX + Math.cos(a) * 60, y: 440, vx: 0, vy: -80 - Math.random() * 120, life: 0.8, max: 0.8, color: '#ff2020', r: 2 + Math.random() * 2, g: -60 });
+      }
+      if (b.t > 0.8) return;
+    }
+
+    // Gravitace a dopad
+    b.vy = Math.min(b.vy + GRAVITY * dt, MAX_FALL);
+    const wasGround = b.onGround;
+    b.fallV = b.vy;
+    b.onGround = moveY(b, b.vy * dt) === 'ground';
+    if (b.onGround && !wasGround && b.fallV > 400) {
+      cam.shake = Math.max(cam.shake, 0.35);
+      burst(bc, b.y + b.h, 14, '#5a1030', 200, 0.5);
+      Sound.play('stomp');
+    }
+    if (b.state === 'intro') {
+      if (b.onGround) { b.state = 'walk'; cam.shake = 0.7; Sound.play('roar'); }
+      return;
+    }
+
+    const enraged = b.hp <= Math.ceil(b.maxHp / 2);
+    if (enraged && !b.enraged) {
+      b.enraged = true;
+      game.flash = 0.4;
+      Sound.play('roar');
+      showBanner('DUHOROH ZUŘÍ!', 'Rychlejší a víc ohně', 2, '#ff3b3b');
+    }
+
+    let speed = 0;
+    if (b.state === 'walk') {
+      b.face = pc < bc ? -1 : 1;
+      speed = Math.abs(pc - bc) < 24 ? 0 : enraged ? 140 : 95;
+      if (!b.onGround) speed = Math.max(speed, 230);
+      b.fireT -= dt;
+      b.chargeT -= dt;
+      if (b.fireT <= 0) { shootFire(b, enraged); b.fireT = enraged ? 2.1 : 3.1; }
+      if (b.chargeT <= 0 && b.onGround && Math.abs(pc - bc) < 520) {
+        b.state = 'rear'; b.t = 0.7;
+        Sound.play('growl');
+      }
+    } else if (b.state === 'rear') {
+      b.t -= dt;
+      if (b.t <= 0) { b.state = 'charge'; b.t = 1.1; }
+    } else if (b.state === 'charge') {
+      speed = enraged ? 480 : 400;
+      b.t -= dt;
+      if (Math.random() < dt * 30) burst(bc - b.face * 40, b.y + b.h, 2, '#ff6a00', 80, 0.4);
+    }
+
+    const hitWall = moveX(b, b.face * speed * dt);
+    b.x = Math.max(0, Math.min(b.x, lvl.w * TILE - b.w));
+    if (b.state === 'charge' && (b.t <= 0 || hitWall)) {
+      if (hitWall) { cam.shake = Math.max(cam.shake, 0.3); Sound.play('stomp'); }
+      b.state = 'walk';
+      b.chargeT = 3.5 + Math.random() * 2;
+    }
+    // Skok přes překážky a propasti
+    if (b.onGround && b.state === 'walk' && speed > 0) {
+      const aheadX = b.face > 0 ? b.x + b.w + 4 : b.x - 4;
+      const floorAhead = isFloor(tileAt(Math.floor(aheadX / TILE), Math.floor((b.y + b.h + 2) / TILE)));
+      if (hitWall || !floorAhead) b.vy = -900;
+    }
+    if (b.y > VIEW_H + 120) {
+      const nx = findGroundX(p.x + p.face * 300);
+      b.x = nx - b.w / 2; b.y = -220; b.vy = 0; b.state = 'walk';
+      addFloater('Démon se vrací!', pc, p.y - 30, '#ff5050');
+      Sound.play('growl');
+    }
+
+    // Kontakt s hráčem
+    if (overlap(p, b.x + 10, b.y + 8, b.w - 20, b.h - 8)) {
+      const stomp = p.vy > 0 && p.prevY + p.h <= b.y + 26;
+      if ((stomp || p.power.gold > 0) && b.hurtT <= 0) {
+        damageBoss(b);
+        if (stomp) { p.vy = -JUMP_V * 1.05; p.jumpCut = true; p.squash = 1.3; }
+        else { p.vx = (pc < bc ? -1 : 1) * 380; p.vy = -420; }
+      } else if (stomp) {
+        p.vy = -JUMP_V * 0.8; p.jumpCut = true;
+      } else {
+        hurt(b);
+      }
+    }
+  }
+
+  function damageBoss(b) {
+    b.hp--;
+    b.hurtT = 1;
+    cam.shake = Math.max(cam.shake, 0.35);
+    Sound.play('bosshit');
+    burst(b.x + b.w / 2, b.y + 10, 20, '#ff2a2a', 260, 0.6);
+    if (b.hp <= 0) {
+      b.state = 'dying';
+      b.dying = 1.8;
+      lvl.fireballs = [];
+      game.flash = 0.6;
+      Sound.play('bossdie');
+      addScore(1000, b.x + b.w / 2, b.y - 40);
+    } else {
+      addScore(100, b.x + b.w / 2, b.y - 20);
+      if (b.state === 'charge' || b.state === 'rear') { b.state = 'walk'; b.chargeT = 3; }
+    }
+  }
+
+  function shootFire(b, enraged) {
+    const p = player;
+    const hx = b.x + b.w / 2 + b.face * 70, hy = b.y - 30;
+    const base = Math.atan2(p.y + p.h / 2 - hy, p.x + p.w / 2 - hx);
+    const spread = enraged ? [-0.28, 0, 0.28] : [0];
+    const sp = enraged ? 300 : 250;
+    for (const s of spread) {
+      lvl.fireballs.push({ x: hx, y: hy, vx: Math.cos(base + s) * sp, vy: Math.sin(base + s) * sp, life: 4, r: 10 });
+    }
+    burst(hx, hy, 10, '#ff3a00', 150, 0.4, -100);
+    Sound.play('fire');
+  }
+
+  function updateFireballs(dt) {
+    const p = player;
+    const list = lvl.fireballs;
+    if (!list) return;
+    for (let i = list.length - 1; i >= 0; i--) {
+      const f = list[i];
+      f.x += f.vx * dt; f.y += f.vy * dt; f.life -= dt;
+      if (Math.random() < dt * 40) particles.push({ x: f.x, y: f.y, vx: (Math.random() - 0.5) * 40, vy: -30, life: 0.35, max: 0.35, color: Math.random() < 0.5 ? '#ff2a00' : '#2a0008', r: 3 + Math.random() * 3, g: -80 });
+      const solid = isSolid(tileAt(Math.floor(f.x / TILE), Math.floor(f.y / TILE)));
+      if (f.life <= 0 || solid) { burst(f.x, f.y, 8, '#ff5a00', 120, 0.35); list.splice(i, 1); continue; }
+      if (overlap(p, f.x - f.r + 3, f.y - f.r + 3, f.r * 2 - 6, f.r * 2 - 6)) {
+        list.splice(i, 1);
+        burst(f.x, f.y, 10, '#ff5a00', 160, 0.4);
+        hurt({ x: f.x - 5, w: 10 });
+        if (game.state !== 'play') return;
+      }
+    }
   }
 
   // ================================================================
@@ -1576,6 +1814,293 @@
     ctx.restore();
   }
 
+  function drawBossWing(sx, sy, flap, color) {
+    ctx.fillStyle = color;
+    ctx.strokeStyle = '#ff1f3d';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(sx, sy);
+    ctx.lineTo(sx - 8, sy - 46 - flap);
+    ctx.lineTo(sx - 64, sy - 58 - flap * 1.3);
+    ctx.quadraticCurveTo(sx - 52, sy - 40 - flap, sx - 60, sy - 28 - flap * 0.6);
+    ctx.quadraticCurveTo(sx - 40, sy - 30 - flap * 0.5, sx - 42, sy - 14);
+    ctx.quadraticCurveTo(sx - 22, sy - 16, sx, sy);
+    ctx.fill();
+    ctx.stroke();
+    ctx.beginPath();
+    ctx.moveTo(sx - 8, sy - 46 - flap); ctx.lineTo(sx - 30, sy - 22);
+    ctx.moveTo(sx - 8, sy - 46 - flap); ctx.lineTo(sx - 52, sy - 34 - flap * 0.7);
+    ctx.stroke();
+  }
+
+  function drawBoss() {
+    const b = lvl.boss;
+    if (!b) return;
+    const t = game.vt;
+    const bc = b.x + b.w / 2, by = b.y + b.h;
+
+    // Runový kruh při vyvolání
+    if (b.state === 'intro' || (b.state === 'walk' && b.anim < 2.4)) {
+      const a = b.state === 'intro' ? Math.min(1, (1.8 - b.t) * 2) : Math.max(0, 1 - (b.anim - 1.8) * 1.6);
+      ctx.save();
+      ctx.globalAlpha = a;
+      ctx.translate(b.runeX, 440);
+      ctx.scale(1, 0.28);
+      ctx.rotate(t * 1.5);
+      ctx.strokeStyle = '#ff1a1a';
+      ctx.lineWidth = 5;
+      ctx.beginPath(); ctx.arc(0, 0, 90, 0, Math.PI * 2); ctx.stroke();
+      ctx.lineWidth = 3;
+      ctx.beginPath(); ctx.arc(0, 0, 70, 0, Math.PI * 2); ctx.stroke();
+      ctx.beginPath();
+      for (let i = 0; i < 6; i++) {
+        const a1 = i * Math.PI / 3, a2 = a1 + Math.PI * 2 / 3;
+        ctx.moveTo(Math.cos(a1) * 70, Math.sin(a1) * 70);
+        ctx.lineTo(Math.cos(a2) * 70, Math.sin(a2) * 70);
+      }
+      ctx.stroke();
+      ctx.fillStyle = '#ff1a1a';
+      for (let i = 0; i < 12; i++) {
+        const a1 = i * Math.PI / 6;
+        ctx.fillRect(Math.cos(a1) * 80 - 4, Math.sin(a1) * 80 - 4, 8, 8);
+      }
+      ctx.restore();
+      // Rudý paprsek z nebe
+      if (b.state === 'intro') {
+        const g = ctx.createLinearGradient(b.runeX - 50, 0, b.runeX + 50, 0);
+        g.addColorStop(0, 'rgba(255,0,30,0)');
+        g.addColorStop(0.5, `rgba(255,30,30,${0.35 + 0.15 * Math.sin(t * 30)})`);
+        g.addColorStop(1, 'rgba(255,0,30,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(b.runeX - 50, -400, 100, 840);
+      }
+    }
+    if (b.y + b.h < -300) return;
+
+    ctx.save();
+    if (b.state === 'dying') {
+      ctx.globalAlpha = Math.max(0, Math.min(1, b.dying / 1.2));
+      ctx.translate((Math.random() - 0.5) * 8, (Math.random() - 0.5) * 6);
+    } else if (b.hurtT > 0 && Math.floor(t * 20) % 2 === 0) {
+      ctx.globalAlpha = 0.35;
+    }
+    const rearing = b.state === 'rear';
+    const moving = b.state === 'charge' || (b.state === 'walk' && b.onGround);
+    const gait = moving ? b.anim * (b.state === 'charge' ? 22 : 11) : 0;
+    const bob = moving ? Math.abs(Math.sin(gait)) * 3 : 0;
+
+    // Stín a démonická aura
+    ctx.fillStyle = 'rgba(20, 0, 10, 0.45)';
+    ctx.beginPath(); ctx.ellipse(bc, by, 56, 8, 0, 0, Math.PI * 2); ctx.fill();
+    const pulse = 0.5 + 0.5 * Math.sin(t * 4);
+    const aura = ctx.createRadialGradient(bc, by - 50, 10, bc, by - 50, 120);
+    aura.addColorStop(0, `rgba(255, 0, 40, ${0.28 + 0.15 * pulse})`);
+    aura.addColorStop(1, 'rgba(120, 0, 30, 0)');
+    ctx.fillStyle = aura;
+    ctx.beginPath(); ctx.arc(bc, by - 50, 120, 0, Math.PI * 2); ctx.fill();
+
+    ctx.translate(bc, by - bob);
+    ctx.scale(b.face, 1);
+    if (rearing) {
+      ctx.translate(-30, 0);
+      ctx.rotate(-0.35 * Math.min(1, (0.7 - b.t) * 4));
+      ctx.translate(30, 0);
+    }
+    const flap = Math.sin(t * 7) * 12;
+
+    // Vzdálenější křídlo
+    drawBossWing(-6, -60, flap, '#0d0006');
+
+    // Ohnivý ocas
+    for (let i = 0; i < 6; i++) {
+      const fx = -44 - i * 6, fy = -56 + i * 5 + Math.sin(t * 14 + i) * 3;
+      ctx.fillStyle = i % 2 ? '#ff3a00' : '#ffae00';
+      ctx.beginPath(); ctx.arc(fx, fy, 7 - i * 0.8, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Nohy
+    const legs = [[-32, 0], [-20, Math.PI], [20, Math.PI / 2], [32, Math.PI * 1.5]];
+    legs.forEach(([lx, ph], i) => {
+      let ox = Math.sin(gait + ph) * 7, lift = Math.max(0, Math.cos(gait + ph)) * 5;
+      if (rearing && i >= 2) { ox = 6; lift = 22; }
+      ctx.fillStyle = i % 2 ? '#1a0209' : '#0d0004';
+      ctx.fillRect(lx - 4.5 + ox * 0.5, -40, 9, 34 - lift);
+      ctx.fillStyle = '#ff2a1a';
+      ctx.fillRect(lx - 6 + ox, -8 - lift, 12, 7);
+      ctx.fillStyle = 'rgba(255, 140, 0, 0.6)';
+      ctx.fillRect(lx - 6 + ox, -3 - lift, 12, 2);
+    });
+
+    // Tělo
+    const body = ctx.createLinearGradient(0, -64, 0, -24);
+    body.addColorStop(0, '#3d0717');
+    body.addColorStop(1, '#070003');
+    ctx.fillStyle = body;
+    ctx.beginPath(); ctx.ellipse(0, -44, 46, 21, 0, 0, Math.PI * 2); ctx.fill();
+    // Lávové praskliny
+    ctx.strokeStyle = `rgba(255, ${60 + 80 * pulse}, 0, 0.9)`;
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-30, -50); ctx.lineTo(-18, -42); ctx.lineTo(-22, -32); ctx.lineTo(-10, -26);
+    ctx.moveTo(-4, -58); ctx.lineTo(4, -46); ctx.lineTo(0, -36);
+    ctx.moveTo(14, -54); ctx.lineTo(24, -44); ctx.lineTo(20, -34);
+    ctx.stroke();
+    // Žebra
+    ctx.strokeStyle = 'rgba(255, 60, 80, 0.35)';
+    ctx.lineWidth = 1.5;
+    for (let i = 0; i < 4; i++) {
+      ctx.beginPath(); ctx.arc(-6 + i * 9, -44, 14, Math.PI * 0.35, Math.PI * 0.75); ctx.stroke();
+    }
+
+    // Krk
+    ctx.fillStyle = '#1f030d';
+    ctx.beginPath();
+    ctx.moveTo(22, -60); ctx.lineTo(38, -84); ctx.lineTo(54, -78); ctx.lineTo(44, -40);
+    ctx.closePath(); ctx.fill();
+
+    // Hlava
+    ctx.fillStyle = '#16020a';
+    ctx.beginPath();
+    ctx.moveTo(36, -90); ctx.lineTo(60, -88); ctx.lineTo(80, -72); ctx.lineTo(79, -64);
+    ctx.lineTo(54, -64); ctx.lineTo(42, -72);
+    ctx.closePath(); ctx.fill();
+    // Rozevřená tlama
+    const jaw = rearing || b.state === 'charge' ? 7 : 3 + Math.sin(t * 3) * 2;
+    ctx.fillStyle = '#7a0016';
+    ctx.beginPath();
+    ctx.moveTo(56, -64); ctx.lineTo(79, -64); ctx.lineTo(74, -60 + jaw); ctx.lineTo(54, -60);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#16020a';
+    ctx.beginPath();
+    ctx.moveTo(54, -60); ctx.lineTo(75, -59 + jaw); ctx.lineTo(70, -53 + jaw); ctx.lineTo(52, -54);
+    ctx.closePath(); ctx.fill();
+    ctx.fillStyle = '#fff4e6';
+    for (const fx of [60, 66, 72]) {
+      ctx.beginPath(); ctx.moveTo(fx, -64); ctx.lineTo(fx + 2, -57); ctx.lineTo(fx + 4, -64); ctx.fill();
+    }
+    ctx.beginPath(); ctx.moveTo(64, -58 + jaw); ctx.lineTo(66, -63 + jaw * 0.3); ctx.lineTo(68, -58 + jaw); ctx.fill();
+    // Kozí rohy a uši
+    ctx.strokeStyle = '#0a0003';
+    ctx.lineWidth = 5;
+    ctx.beginPath(); ctx.arc(34, -92, 10, Math.PI * 0.1, Math.PI * 1.2, true); ctx.stroke();
+    ctx.fillStyle = '#2a0410';
+    ctx.beginPath(); ctx.moveTo(40, -88); ctx.lineTo(43, -104); ctx.lineTo(49, -88); ctx.fill();
+    // Oko
+    const glow = rearing ? 14 : 8 + pulse * 3;
+    ctx.fillStyle = 'rgba(255, 30, 0, 0.55)';
+    ctx.beginPath(); ctx.arc(56, -79, glow, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#ffe000';
+    ctx.beginPath(); ctx.ellipse(56, -79, 5, 3.5, -0.3, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.fillRect(55.2, -82.5, 1.8, 7);
+    ctx.strokeStyle = '#000';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.moveTo(48, -86); ctx.lineTo(62, -82); ctx.stroke();
+    // Kouř z nozder
+    if (Math.random() < 0.15 && b.state !== 'dying') {
+      particles.push({ x: bc + b.face * 78, y: by - bob - 68, vx: b.face * 40, vy: -30, life: 0.7, max: 0.7, color: 'rgba(60, 20, 30, 0.8)', r: 3 + Math.random() * 3, g: -60 });
+    }
+
+    // Pekelný roh
+    ctx.save();
+    ctx.shadowColor = '#ff0020';
+    ctx.shadowBlur = 18;
+    const horn = ctx.createLinearGradient(52, -88, 92, -128);
+    horn.addColorStop(0, '#5a0010');
+    horn.addColorStop(0.6, '#ff1030');
+    horn.addColorStop(1, '#ffd000');
+    ctx.fillStyle = horn;
+    ctx.beginPath();
+    ctx.moveTo(48, -88); ctx.lineTo(94, -132); ctx.lineTo(58, -84);
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+    ctx.strokeStyle = 'rgba(30, 0, 8, 0.85)';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    for (let i = 1; i < 6; i++) {
+      const k = i / 6;
+      const cx = 53 + 41 * k, cy = -86 - 46 * k, w2 = 5 * (1 - k) + 1;
+      ctx.moveTo(cx - w2, cy + w2 * 0.4); ctx.lineTo(cx + w2, cy - w2 * 1.4);
+    }
+    ctx.stroke();
+
+    // Plamenná hříva
+    for (let i = 0; i < 6; i++) {
+      const k = i / 5;
+      const mx = 18 + 22 * k, my = -60 - 30 * k;
+      const h = 14 + Math.sin(t * 18 + i * 1.7) * 5;
+      ctx.fillStyle = i % 2 ? '#ff3a00' : '#ff8a00';
+      ctx.beginPath();
+      ctx.moveTo(mx - 6, my);
+      ctx.quadraticCurveTo(mx - 12, my - h * 0.6, mx - 8, my - h);
+      ctx.quadraticCurveTo(mx - 2, my - h * 0.5, mx + 6, my);
+      ctx.fill();
+      ctx.fillStyle = '#ffd34d';
+      ctx.beginPath(); ctx.arc(mx - 2, my - 3, 2.5, 0, Math.PI * 2); ctx.fill();
+    }
+
+    // Bližší křídlo
+    drawBossWing(4, -56, flap * 1.1, '#1d0210');
+    ctx.restore();
+  }
+
+  function drawFireballs() {
+    const list = lvl.fireballs;
+    if (!list) return;
+    const t = game.vt;
+    for (const f of list) {
+      const g = ctx.createRadialGradient(f.x, f.y, 1, f.x, f.y, f.r + 6);
+      g.addColorStop(0, '#fff3c0');
+      g.addColorStop(0.35, '#ff7a00');
+      g.addColorStop(0.75, '#c40018');
+      g.addColorStop(1, 'rgba(60, 0, 10, 0)');
+      ctx.fillStyle = g;
+      ctx.beginPath(); ctx.arc(f.x, f.y, f.r + 6 + Math.sin(t * 30) * 1.5, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = '#2a0008';
+      ctx.beginPath(); ctx.arc(f.x - 3, f.y - 1, 1.6, 0, Math.PI * 2); ctx.arc(f.x + 3, f.y - 1, 1.6, 0, Math.PI * 2); ctx.fill();
+    }
+  }
+
+  function drawBossOverlay() {
+    const b = lvl.boss;
+    if (b) {
+      const pulse = 0.5 + 0.5 * Math.sin(game.vt * 2.5);
+      const v = ctx.createRadialGradient(viewW / 2, viewH / 2, viewH * 0.35, viewW / 2, viewH / 2, viewW * 0.75);
+      v.addColorStop(0, 'rgba(120, 0, 20, 0.08)');
+      v.addColorStop(1, `rgba(90, 0, 15, ${0.45 + 0.15 * pulse})`);
+      ctx.fillStyle = v;
+      ctx.fillRect(0, 0, viewW, viewH);
+
+      if (b.state !== 'intro' || b.t < 1.2) {
+        const w = Math.min(420, viewW - 80), x = (viewW - w) / 2, y = 66;
+        ctx.textAlign = 'center';
+        ctx.font = '900 17px "Trebuchet MS", system-ui, sans-serif';
+        ctx.lineWidth = 4;
+        ctx.strokeStyle = '#1a0005';
+        ctx.strokeText('😈 DUHOROH · PEKELNÝ JEDNOROŽEC', viewW / 2, y - 8);
+        ctx.fillStyle = '#ff5a5a';
+        ctx.fillText('😈 DUHOROH · PEKELNÝ JEDNOROŽEC', viewW / 2, y - 8);
+        ctx.fillStyle = 'rgba(20, 0, 6, 0.85)';
+        rr(ctx, x, y, w, 14, 7); ctx.fill();
+        const k = Math.max(0, b.hp) / b.maxHp;
+        if (k > 0) {
+          const g = ctx.createLinearGradient(x, 0, x + w, 0);
+          g.addColorStop(0, '#ff7a00');
+          g.addColorStop(1, '#ff0030');
+          ctx.fillStyle = g;
+          rr(ctx, x + 2, y + 2, (w - 4) * k, 10, 5); ctx.fill();
+        }
+        ctx.strokeStyle = '#ff2a40';
+        ctx.lineWidth = 2;
+        rr(ctx, x, y, w, 14, 7); ctx.stroke();
+      }
+    }
+    if (game.flash > 0) {
+      ctx.fillStyle = `rgba(255, 40, 40, ${game.flash * 0.8})`;
+      ctx.fillRect(0, 0, viewW, viewH);
+    }
+  }
+
   function render() {
     ctx.setTransform(scale * dpr, 0, 0, scale * dpr, 0, 0);
     drawBackground();
@@ -1595,9 +2120,12 @@
     drawCoins();
     drawPickles();
     drawEnemies();
+    drawBoss();
     if (game.state !== 'menu') drawPlayer();
+    drawFireballs();
     drawParticles();
     ctx.restore();
+    if (lvl.boss || game.flash > 0) drawBossOverlay();
     if (game.state !== 'menu') drawBanner();
   }
 
